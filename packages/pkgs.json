@@ -1,0 +1,7 @@
+[
+ {
+  "name": "CH32V307_SDK",
+  "path": "/packages/peripherals/hal-sdk/wch/ch32v307_sdk",
+  "ver": "v2.7"
+ }
+]
