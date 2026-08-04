@@ -1,13 +1,25 @@
+/* bl_s2 linker script, based on the SDK Link.ld
+ * (packages/ch32v307_sdk-v2.7/EVT/EXAM/SRC/Ld/Link.ld).
+ *
+ * Flash layout per flash_table.md:
+ *   bl_s1  onchip 0     2K   jump to bl_s2
+ *   app_s1 onchip 2K    222K app slot 1
+ *   bl_s2  onchip 448K  32K  actual bootloader
+ *
+ * bl_s2 runs from 448K (0x00070000), i.e. the non-zero-wait flash region.
+ */
 ENTRY( _start )
 
 __stack_size = 2048;
 
 PROVIDE( _stack_size = __stack_size );
 
+/* app_s1 entry: 2K (flash_table.md). Used by main.c via `extern char __app_start`. */
+__app_start = 0x00000800;
 
 MEMORY
 {
-    FLASH (rx) : ORIGIN = 0x00000800, LENGTH = 222K /* app_s1 per flash_table.md */
+    FLASH (rx) : ORIGIN = 0x00070000, LENGTH = 32K
     RAM (xrw) : ORIGIN = 0x20000000, LENGTH = 64K
 }
 
@@ -40,49 +52,7 @@ SECTIONS
         *(.glue_7)
         *(.glue_7t)
         *(.gnu.linkonce.t.*)
-
-         /* section information for finsh shell */
         . = ALIGN(4);
-        __fsymtab_start = .;
-        KEEP(*(FSymTab))
-        __fsymtab_end = .;
-        . = ALIGN(4);
-        __vsymtab_start = .;
-        KEEP(*(VSymTab))
-        __vsymtab_end = .;
-        . = ALIGN(4);
-
-        /* section information for initial. */
-        . = ALIGN(4);
-        __rt_init_start = .;
-        KEEP(*(SORT(.rti_fn*)))
-        __rt_init_end = .;
-        . = ALIGN(4);
-
-        /* section information for modules */
-        . = ALIGN(4);
-        __rtmsymtab_start = .;
-        KEEP(*(RTMSymTab))
-        __rtmsymtab_end = .;
-            . = ALIGN(4);
-
-        /* section information for initial. */
-        . = ALIGN(4);
-        __rt_init_start = .;
-        KEEP(*(SORT(.rti_fn*)))
-        __rt_init_end = .;
-
-        . = ALIGN(4);
-
-        PROVIDE(__ctors_start__ = .);
-        KEEP (*(SORT(.init_array.*)))
-        KEEP (*(.init_array))
-        PROVIDE(__ctors_end__ = .);
-
-        . = ALIGN(4);
-
-        _etext = .;
-
     } >FLASH AT>FLASH
 
     .fini :
