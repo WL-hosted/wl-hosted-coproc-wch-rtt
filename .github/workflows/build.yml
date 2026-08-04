@@ -1,0 +1,47 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install scons
+        run: python3 -m pip install scons
+
+      - name: Download RISC-V toolchain
+        run: |
+          curl -sSL -o riscv32-wch-elf-gcc-15.tar.xz \
+            https://github.com/kaidegit/wchrv-toolchain/releases/download/2026-8-4/riscv32-wch-elf-gcc-15.tar.xz
+          mkdir -p toolchain
+          tar -xf riscv32-wch-elf-gcc-15.tar.xz -C toolchain
+          TC_BIN="$(cd "$(dirname "$(find toolchain -name riscv32-wch-elf-gcc -type f | head -1)")" && pwd)"
+          echo "RTT_EXEC_PATH=$TC_BIN" >> "$GITHUB_ENV"
+          echo "$TC_BIN" >> "$GITHUB_PATH"
+
+      - name: Generate CMakeLists.txt
+        run: scons --target=cmake
+
+      - name: Configure CMake
+        run: cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build-debug --parallel
+
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rtthread-firmware
+          path: |
+            build-debug/rtthread.bin
+            build-debug/rtthread.hex
+            build-debug/rtthread.elf
+            build-debug/rtthread.map
+          if-no-files-found: error
