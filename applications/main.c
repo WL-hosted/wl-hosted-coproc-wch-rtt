@@ -11,6 +11,7 @@
 #include <rtthread.h>
 #include <rtdevice.h>
 #include "ch32v30x.h"
+#include "wlh/wlh_app.h"
 
 /* defined the LED0 pin: PB5 */
 #define LED0_PIN              rt_pin_get("PB.5")
@@ -19,6 +20,13 @@ int main(void)
 {
     /* set LED0 pin mode to output */
     rt_pin_mode(LED0_PIN, PIN_MODE_OUTPUT);
+
+    /* Start the WL-hosted coprocessor: coproc-core + USB bulk transport.
+     * Runs its own threads; the main thread stays on the LED heartbeat. */
+    if (wlh_app_init() != 0)
+    {
+        rt_kprintf("wlh_app_init failed\n");
+    }
 
     while (1)
     {

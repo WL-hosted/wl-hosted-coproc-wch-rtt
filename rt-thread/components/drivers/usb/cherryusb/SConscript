@@ -101,7 +101,8 @@ if GetDepend(['RT_CHERRYUSB_DEVICE']):
         src += Glob('port/aic/usb_dc_aic.c')
         src += Glob('port/aic/usb_dc_aic_ll.c')
     if GetDepend(['RT_CHERRYUSB_DEVICE_CH32']):
-        if GetDepend(['RT_CHERRYUSB_DEVICE_HS']):
+        path += [cwd + '/port/ch32']
+        if GetDepend(['RT_CHERRYUSB_DEVICE_SPEED_HS']):
             src += Glob('port/ch32/usb_dc_usbhs.c')
         else:
             src += Glob('port/ch32/usb_dc_usbfs.c')

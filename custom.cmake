@@ -80,3 +80,6 @@ add_custom_target(flash_all
     COMMENT "Flash merged ${_WLHOSTED_MERGED_HEX} via WCH-Link (wlink)..."
     VERBATIM
 )
+
+# wl-hosted-core 经 core/SConscript（RT-Thread group）接入，由 scons 统一收集
+# 进生成的 CMakeLists；这里不放任何 core 接线。
