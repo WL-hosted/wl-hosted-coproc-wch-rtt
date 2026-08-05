@@ -1,7 +1,7 @@
 /* bl_s2 linker script, based on the SDK Link.ld
  * (packages/ch32v307_sdk-v2.7/EVT/EXAM/SRC/Ld/Link.ld).
  *
- * Flash layout per flash_table.md:
+ * Flash layout per part_table.md:
  *   bl_s1  onchip 0     2K   jump to bl_s2
  *   app_s1 onchip 2K    222K app slot 1
  *   bl_s2  onchip 448K  32K  actual bootloader
@@ -14,7 +14,7 @@ __stack_size = 2048;
 
 PROVIDE( _stack_size = __stack_size );
 
-/* app_s1 entry: 2K (flash_table.md). Used by main.c via `extern char __app_start`. */
+/* app_s1 entry: 2K (part_table.md). Used by main.c via `extern char __app_start`. */
 __app_start = 0x00000800;
 
 MEMORY

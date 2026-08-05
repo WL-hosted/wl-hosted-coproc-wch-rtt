@@ -1,7 +1,7 @@
 /*
  * bl_s2: stage-2 bootloader (bare-metal, SDK ch32v307_sdk-v2.7).
  *
- * Runs from flash offset 448K (0x00070000) per flash_table.md, inside the
+ * Runs from flash offset 448K (0x00070000) per part_table.md, inside the
  * non-zero-wait flash region. Prints "bl_s2" on the app's console UART
  * (USART1 @ 115200), waits 2s, then jumps to app_s1 at 2K (0x00000800).
  *
@@ -43,7 +43,7 @@ int main(void)
 
     Delay_Init();              /* SysTick delay base (144MHz) */
     USART_Printf_Init(115200); /* same console UART as the app: USART1 */
-    uart_write_str("bl_s2\r\n");
+    uart_write_str("bl_s2: app will boot in 2s\r\n");
 
     Delay_Ms(2000);            /* 2s recovery window before handing over */
 

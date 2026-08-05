@@ -40,11 +40,12 @@ if PLATFORM == 'gcc':
     OBJDUMP = PREFIX + 'objdump'
     OBJCPY = PREFIX + 'objcopy'
 
-    DEVICE = ' -march=rv32imac -mabi=ilp32 -DUSE_PLIC -DUSE_M_TIME -DNO_INIT -mcmodel=medany -msmall-data-limit=8 -L.  -nostartfiles  -lc '
+    DEVICE = ' -march=rv32imac -mabi=ilp32 -DUSE_PLIC -DUSE_M_TIME -DNO_INIT -mcmodel=medany -msmall-data-limit=8 -ffunction-sections -fdata-sections -L.  -nostartfiles -lc '
     CFLAGS = DEVICE
     CFLAGS += ' -save-temps=obj'
     AFLAGS = '-c'+ DEVICE + ' -x assembler-with-cpp'
     LFLAGS = DEVICE
+    LFLAGS += ' --specs=nano.specs'
     LFLAGS += ' -Wl,--gc-sections,-cref,-Map=' + MAP_FILE
     LFLAGS += ' -T ' + LINK_FILE
     AFLAGS += ' -I.'

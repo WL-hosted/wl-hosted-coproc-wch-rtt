@@ -7,7 +7,7 @@ PROVIDE( _stack_size = __stack_size );
 
 MEMORY
 {
-    FLASH (rx) : ORIGIN = 0x00000800, LENGTH = 222K /* app_s1 per flash_table.md */
+    FLASH (rx) : ORIGIN = 0x00000800, LENGTH = 222K /* app_s1 per part_table.md */
     RAM (xrw) : ORIGIN = 0x20000000, LENGTH = 64K
 }
 

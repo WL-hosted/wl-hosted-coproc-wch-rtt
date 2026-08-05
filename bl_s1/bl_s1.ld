@@ -1,6 +1,6 @@
 /* bl_s1 linker script.
  *
- * Flash layout per flash_table.md:
+ * Flash layout per part_table.md:
  *   bl_s1  onchip 0     2K   jump to next stage
  *   bl_s2  onchip 448K  32K  actual bootloader
  *
@@ -10,8 +10,8 @@
 ENTRY( _start )
 
 /* Jump target used by bl_s1.S via `la t0, __jump_target`.
- * Normal: bl_s2 @ 448K (flash_table.md). Debug: app_s1 @ 2K to bypass bl_s2. */
-__jump_target = 0x00070000;   /* bl_s2 @ 448K (flash_table.md) */
+ * Normal: bl_s2 @ 448K (part_table.md). Debug: app_s1 @ 2K to bypass bl_s2. */
+__jump_target = 0x00070000;   /* bl_s2 @ 448K (part_table.md) */
 
 MEMORY
 {
