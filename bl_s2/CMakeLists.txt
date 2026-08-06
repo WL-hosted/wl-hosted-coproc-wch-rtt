@@ -47,6 +47,7 @@ add_executable(bl_s2
     startup_ch32v30x_D8C.S
     ${SRC_DIR}/Core/core_riscv.c
     ${SRC_DIR}/Debug/debug.c
+    ${SRC_DIR}/Peripheral/src/ch32v30x_flash.c
     ${SRC_DIR}/Peripheral/src/ch32v30x_gpio.c
     ${SRC_DIR}/Peripheral/src/ch32v30x_usart.c
     ${SRC_DIR}/Peripheral/src/ch32v30x_rcc.c

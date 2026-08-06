@@ -6,7 +6,11 @@
  *   app_s1 onchip 2K    222K app slot 1
  *   bl_s2  onchip 448K  32K  actual bootloader
  *
- * bl_s2 runs from 448K (0x00070000), i.e. the non-zero-wait flash region.
+ * bl_s2 starts at 448K (0x00070000). Only the startup sections (.entry:
+ * .init/.vector/.text.vector_handler/.text.handle_reset) stay in flash at
+ * their own VMA — the reset stub copies everything else (.text/.rodata/
+ * .data) to SRAM and jumps there. RAM is sized for the smallest
+ * RAM_CODE_MOD (32K, mode 0b111); larger RAM configs still work.
  */
 ENTRY( _start )
 
@@ -20,31 +24,33 @@ __app_start = 0x00000800;
 MEMORY
 {
     FLASH (rx) : ORIGIN = 0x00070000, LENGTH = 32K
-    RAM (xrw) : ORIGIN = 0x20000000, LENGTH = 64K
+    RAM (xrw) : ORIGIN = 0x20000000, LENGTH = 32K
 }
 
 
 SECTIONS
 {
 
-    .init :
+    /* Startup code that must execute from flash at its own VMA: reset entry,
+     * vector table, weak handlers and handle_reset (which performs the
+     * SRAM relocation of the sections below). */
+    .entry :
     {
-        _sinit = .;
         . = ALIGN(4);
         KEEP(*(SORT_NONE(.init)))
         . = ALIGN(4);
-        _einit = .;
-    } >FLASH AT>FLASH
-
-    .vector :
-    {
-        *(.vector);
-        . = ALIGN(64);
+        KEEP(*(.vector))
+        *(.text.vector_handler)
+        *(.text.handle_reset)
+        . = ALIGN(4);
+        /* Flash LMA of the relocated image (start of .text LMA). */
+        PROVIDE( _text_lma = . );
     } >FLASH AT>FLASH
 
     .text :
     {
         . = ALIGN(4);
+        PROVIDE( _text_vma = . );
         *(.text)
         *(.text.*)
         *(.rodata)
@@ -53,7 +59,8 @@ SECTIONS
         *(.glue_7t)
         *(.gnu.linkonce.t.*)
         . = ALIGN(4);
-    } >FLASH AT>FLASH
+        PROVIDE( _etext = . );
+    } >RAM AT>FLASH
 
     .fini :
     {
@@ -61,7 +68,6 @@ SECTIONS
         . = ALIGN(4);
     } >FLASH AT>FLASH
 
-    PROVIDE( _etext = . );
     PROVIDE( _eitcm = . );
 
     .preinit_array  :

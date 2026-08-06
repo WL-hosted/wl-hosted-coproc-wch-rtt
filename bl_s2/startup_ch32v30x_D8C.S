@@ -331,6 +331,20 @@ handle_reset:
 1:
 	la sp, _eusrstack 
 2:
+/* Relocate code (.text/.rodata) from flash to SRAM; the startup sections
+ * themselves stay in flash at their own VMA, so PC-relative addressing
+ * stays valid throughout. */
+	la a0, _text_lma
+	la a1, _text_vma
+	la a2, _etext
+	bgeu a1, a2, 2f
+1:
+	lw t0, (a0)
+	sw t0, (a1)
+	addi a0, a0, 4
+	addi a1, a1, 4
+	bltu a1, a2, 1b
+2:
 /* Load data section from flash to RAM */
 	la a0, _data_lma
 	la a1, _data_vma
@@ -372,7 +386,7 @@ handle_reset:
     ori t0, t0, 3           
 	csrw mtvec, t0
 
-    jal  SystemInit
+    call  SystemInit
 	la t0, main
 	csrw mepc, t0
 	mret
