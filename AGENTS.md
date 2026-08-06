@@ -16,7 +16,7 @@ scons --pyconfig-silent
 
 ## 构建与下载
 
-- 根 `CMakeLists.txt` 由 `scons --target=cmake` 生成，**gitignored，不手改**；tracked 的 `custom.cmake` 被其自动 include（flash targets、bl_s1/bl_s2、wl-hosted-core 接入都在这里）。
+- 根 `CMakeLists.txt` 由 `scons --target=cmake` 生成，**gitignored，不手改**；tracked 的 `custom.cmake` 被其自动 include（flash targets、bl_s1/bl_s2 在这里；**wl-hosted-core 不在这里接入**——core 仓库根部的 `SConscript` 由 scons 的源码 walk 自动收集为 `wlh_core` group，无需 custom.cmake 接线）。
 - 新增源码：放进带子目录 SConscript 的目录（如 `applications/wlh/`），改动 SConscript 后重新 `scons --target=cmake` 再配置 CMake。
 - 构建：`cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug && cmake --build build-debug --parallel`。
 - 下载：`cmake --build build-debug --target flash`（app 经 wlink）；`flash_all`（合并 bl_s1+app+bl_s2，需要 mergehex-rs）。
@@ -48,3 +48,4 @@ wl-hosted-coproc-wch-rtt -> wl-hosted-core（git submodule，core/）
 - CherryUSB 端点 DMA 要求 4 字节对齐缓冲。
 - 不在 ISR 里调用 coproc-core 的 `wlh_coproc_on_frame` 或 TX completion。
 - USB 总线复位/断开必须丢弃旧 session 并触发 core 重启（重 Hello）。
+- EMAC TX 描述符只能按环序分配（DMA 挂起后从当前指针顺序取描述符；乱序占用会把已武装帧困在挂起点之后）。TX 环深必须 ≥ `WLH_INITIAL_CREDIT`：环满时 backend 返回 REJECTED，core 丢帧只回 credit——对 UDP 无感，对 TCP 突发是致命的。

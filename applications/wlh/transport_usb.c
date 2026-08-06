@@ -65,6 +65,10 @@ typedef struct usb_transport {
     /* Set by the RESET ISR, consumed by the tx thread (thread context). */
     volatile bool reset_pending;
     volatile bool configured;
+    /* Set when the RX ring could not take another maximum packet and the OUT
+     * endpoint was deliberately left NAKed; the RX thread re-arms it once
+     * draining made room. Backpressure instead of silent byte loss. */
+    volatile bool out_paused;
     /* The reset that precedes the first CONFIGURED event belongs to initial
      * enumeration, before any WL-hosted session exists. Later resets must
      * still tear down the active session even if reconfiguration is fast. */
@@ -161,22 +165,38 @@ static void arm_out_read(uint8_t busid) {
 /* Arm one maximum-size packet at a time. If a larger buffer is armed,
  * CherryUSB waits for a short packet before completing the read; a wire
  * frame whose size is exactly a multiple of 512 bytes would then remain
- * buffered indefinitely. rx_feed() already reassembles the byte stream. */
+ * buffered indefinitely. rx_feed() already reassembles the byte stream.
+ *
+ * The endpoint is re-armed only while the ring holds room for another
+ * maximum packet, so the put below always fits: the arm-time check
+ * guarantees the space is still there when the data arrives (the ISR is the
+ * only producer). When the ring is too full the endpoint stays NAKed and the
+ * host's USB stack retries — backpressure instead of silent byte loss, which
+ * would desynchronize the wire stream (decode errors, sequence gaps,
+ * stranded credits). The RX thread re-arms after draining. */
 static void out_endpoint_callback(uint8_t busid, uint8_t ep, uint32_t nbytes) {
     (void)ep;
     if (nbytes != 0u && !transport.stopping) {
         rt_size_t written =
             rt_ringbuffer_put(&transport.rx_ring, out_chunk, nbytes);
+        transport.stats.rx_isr_packets++;
         if (written != (rt_size_t)nbytes) {
-            /* Ring overrun: the stream is desynchronized; the link layer
-             * recovers via session timeout and re-Hello. */
+            /* Cannot happen while the arm-time space check holds; keep the
+             * counter as a tripwire. */
             transport.stats.rx_overruns++;
         } else {
             transport.stats.rx_bytes += nbytes;
         }
         rt_sem_release(transport.rx_avail);
     }
-    arm_out_read(busid);
+    if (!transport.stopping &&
+        rt_ringbuffer_space_len(&transport.rx_ring) >= WLH_USB_OUT_CHUNK) {
+        arm_out_read(busid);
+    } else {
+        if (!transport.out_paused)
+            transport.stats.rx_pauses++;
+        transport.out_paused = true;
+    }
 }
 
 static void in_endpoint_callback(uint8_t busid, uint8_t ep, uint32_t nbytes) {
@@ -217,7 +237,11 @@ static void rx_consume(size_t count) {
 }
 
 static void rx_feed(const uint8_t *data, size_t size) {
+    static bool resync_active;
+    static size_t last_frame_size;
+
     if (transport.rx_frame_length + size > sizeof(transport.rx_frame)) {
+        transport.stats.rx_resync_bytes += transport.rx_frame_length;
         transport.rx_frame_length = 0u;
         return;
     }
@@ -226,16 +250,39 @@ static void rx_feed(const uint8_t *data, size_t size) {
 
     while (transport.rx_frame_length >= FRAME_HEADER_SIZE) {
         size_t frame_size;
-        if (!frame_header_plausible(transport.rx_frame)) {
+        if (!frame_header_plausible(transport.rx_frame) ||
+            FRAME_HEADER_SIZE + (size_t)transport.rx_frame[6] +
+                    ((size_t)transport.rx_frame[7] << 8) >
+                transport.max_frame_size) {
+            if (!resync_active) {
+                resync_active = true;
+                /* First byte of a desync run: dump what the scanner sees so
+                 * the shift source is identifiable (previous frame overrun,
+                 * dropped USB bytes, ...). */
+                WLH_LOGW(
+                    TAG,
+                    "rx resync: after_size=%u buffered=%u head=%02x %02x %02x "
+                    "%02x %02x %02x %02x %02x",
+                    (unsigned)last_frame_size,
+                    (unsigned)transport.rx_frame_length,
+                    transport.rx_frame[0], transport.rx_frame[1],
+                    transport.rx_frame[2], transport.rx_frame[3],
+                    transport.rx_frame[4], transport.rx_frame[5],
+                    transport.rx_frame[6], transport.rx_frame[7]
+                );
+            }
+            transport.stats.rx_resync_bytes++;
             rx_consume(1u);
             continue;
         }
         frame_size = FRAME_HEADER_SIZE + (size_t)transport.rx_frame[6] +
                      ((size_t)transport.rx_frame[7] << 8);
-        if (frame_size > transport.max_frame_size) {
-            rx_consume(1u);
-            continue;
-        }
+        /* A long frame spans several 512-byte bulk packets; wait until the
+         * whole frame is buffered. Consuming more than rx_frame_length here
+         * would underflow the size_t and turn rx_consume's memmove into a
+         * RAM-wide wild copy. */
+        if (transport.rx_frame_length < frame_size)
+            break;
         wlh_coproc_result_t result = wlh_coproc_on_frame(
             transport.coproc, transport.rx_frame, frame_size
         );
@@ -246,7 +293,11 @@ static void rx_feed(const uint8_t *data, size_t size) {
                 (unsigned)frame_size,
                 (int)result
             );
+        } else {
+            transport.stats.rx_feed_frames++;
         }
+        last_frame_size = frame_size;
+        resync_active = false;
         rx_consume(frame_size);
     }
 }
@@ -262,6 +313,14 @@ static void rx_thread_entry(void *parameter) {
             if (size == 0)
                 break;
             rx_feed(rx_drain, size);
+        }
+        /* Re-arm the OUT endpoint once draining made room for another
+         * maximum packet. While out_paused the endpoint is NAKed and no ISR
+         * runs, so this thread owns the re-arm. */
+        if (transport.out_paused && !transport.stopping &&
+            rt_ringbuffer_space_len(&transport.rx_ring) >= WLH_USB_OUT_CHUNK) {
+            transport.out_paused = false;
+            arm_out_read(WLH_USB_BUS_ID);
         }
     }
 }
@@ -401,6 +460,11 @@ static void tx_thread_entry(void *parameter) {
                     (unsigned)job.size
                 );
                 wlh_usbhs_ep_in_halt(WLH_USB_EP_IN & 0x7fu);
+                /* No host is reading: every queued frame would hit the same
+                 * 2 s timeout. Drain both queues now so the device settles
+                 * into WAITING_FOR_HELLO immediately instead of looping one
+                 * frame per timeout period. */
+                flush_tx_queue(WLH_COPROC_TX_CANCELLED);
                 status = WLH_COPROC_TX_CANCELLED;
             } else if (transport.reset_pending) {
                 /* The RESET ISR interrupted the completion wait. */
@@ -430,6 +494,10 @@ static void usb_event_handler(uint8_t busid, uint8_t event) {
         transport.stats.bus_resets++;
         transport.configured = false;
         transport.reset_pending = true;
+        /* The stack tears the endpoints down; the next CONFIGURED re-arms
+         * the OUT endpoint unconditionally, so the pause flag must not
+         * survive the reset. */
+        transport.out_paused = false;
         /* Interrupt an active bulk-IN completion wait so the old session is
          * torn down before a newly configured host can negotiate. */
         if (transport.tx_done != RT_NULL)

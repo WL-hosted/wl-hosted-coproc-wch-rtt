@@ -48,6 +48,9 @@ volatile uint8_t mps_over_flag = 0;
 volatile bool ep0_rx_data_toggle;
 volatile bool ep0_tx_data_toggle;
 volatile bool epx_tx_data_toggle[USB_NUM_BIDIR_ENDPOINTS - 1];
+/* OUT packets the hardware acknowledged but the software dropped because
+ * UIS_TOG_OK was not set (toggle desync). Exported for usb_stats. */
+volatile uint32_t g_usbhs_rx_tog_drops;
 
 __WEAK void usb_dc_low_level_init(void)
 {
@@ -390,6 +393,21 @@ void USBD_IRQHandler(uint8_t busid)
                         USB_SET_RX_DMA(ep_idx, (uint32_t)g_ch32_usbhs_udc.out_ep[ep_idx].xfer_buf);
                         USB_SET_RX_CTRL(ep_idx, (USB_GET_RX_CTRL(ep_idx) & ~USBHS_EP_R_RES_MASK) | USBHS_EP_R_RES_ACK);
                     }
+                } else {
+                    /* TOG desync: a retry whose ACK was lost on the wire, or
+                     * a toggle state mismatch. The payload must not be
+                     * delivered (it duplicates data already consumed), but
+                     * the endpoint must still ACK so the host advances its
+                     * toggle and the exchange completes. Keeping the NAK from
+                     * ISR entry here wedges the endpoint permanently: the
+                     * host retries the same toggle forever and every
+                     * subsequent write times out. */
+                    g_usbhs_rx_tog_drops++;
+                    USB_SET_RX_CTRL(
+                        ep_idx,
+                        (USB_GET_RX_CTRL(ep_idx) & ~USBHS_EP_R_RES_MASK) |
+                            USBHS_EP_R_RES_ACK
+                    );
                 }
             }
         }

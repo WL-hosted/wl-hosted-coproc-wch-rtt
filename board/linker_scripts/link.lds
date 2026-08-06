@@ -8,7 +8,10 @@ PROVIDE( _stack_size = __stack_size );
 MEMORY
 {
     FLASH (rx) : ORIGIN = 0x00000800, LENGTH = 222K /* app_s1 per part_table.md */
-    RAM (xrw) : ORIGIN = 0x20000000, LENGTH = 64K
+    /* 96K requires RAM_CODE_MOD = CODE-224KB + RAM-96KB; bl_s2 reprograms the
+     * option bytes and reboots on first boot if the chip still splits
+     * 256K+64K (see bl_s2/main.c ensure_ram_code_mode). */
+    RAM (xrw) : ORIGIN = 0x20000000, LENGTH = 96K
 }
 
 

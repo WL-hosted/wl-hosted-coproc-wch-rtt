@@ -9,6 +9,7 @@
 
 #include <rtthread.h>
 
+#include "eth_backend.h"
 #include "firmware_config.h"
 #include "transport.h"
 #include "wlh/log.h"
@@ -47,6 +48,11 @@ static int get_device_info(void *context, wlh_coproc_device_info_t *info) {
 /* Called in task context after the active transport has reset. */
 static void on_transport_reset(void *context) {
     (void)context;
+    /* Runs on the USB TX thread, over 100 ms before the link-control thread
+     * below stops the core (its settle delay): cut every core ingress path in
+     * the ETH backend first, so its worker/link threads cannot touch core
+     * objects while they are being destroyed. */
+    wlh_eth_transport_dead();
     rt_event_send(link_events, LINK_EVENT_TRANSPORT_RESET);
 }
 
@@ -69,8 +75,14 @@ static void link_control_thread(void *parameter) {
         WLH_LOGW(TAG, "transport reset: restarting link core");
         if (wlh_coproc_stop(&coproc) != WLH_COPROC_OK)
             WLH_LOGW(TAG, "core stop failed during restart");
+        /* The stopped core task's TCB/stack leave via the defunct queue and
+         * are reclaimed by the idle thread; give it a slice before the
+         * restart allocates the replacement task on this 64 KiB part. */
+        rt_thread_mdelay(20u);
         if (wlh_coproc_start(&coproc) != WLH_COPROC_OK)
             WLH_LOGE(TAG, "core restart failed");
+        else
+            wlh_eth_transport_alive();
     }
 }
 
@@ -103,10 +115,12 @@ int wlh_app_init(void) {
     memset(&config, 0, sizeof(config));
     config.port.context = RT_NULL;
     config.port.submit_tx = wlh_transport_submit_tx;
+    config.port.ethernet_eth_rx = wlh_eth_rx_from_core;
     config.buffers = (wlh_coproc_buffer_ops_t){RT_NULL, buffer_alloc, buffer_free};
     config.osal = wlh_rtt_osal_ops(&rtt_osal);
     config.device_info =
         (wlh_coproc_device_info_ops_t){RT_NULL, get_device_info};
+    config.eth = (wlh_coproc_eth_ops_t){RT_NULL, wlh_eth_get_info};
     strncpy(
         config.implementation_version,
         WLH_IMPLEMENTATION_VERSION,
@@ -114,8 +128,8 @@ int wlh_app_init(void) {
     );
     config.max_frame_size = wlh_transport_max_frame_size();
     config.heartbeat_interval_ms = WLH_HEARTBEAT_INTERVAL_MS;
-    /* Credit is the in-flight window for the data path; sized to the 64 KiB
-     * RAM budget (see firmware_config.h). */
+    /* Credit is the in-flight window for the data path; it must not exceed
+     * the EMAC TX ring depth (see firmware_config.h). */
     config.initial_credit = WLH_INITIAL_CREDIT;
     config.core_queue_depth = WLH_CORE_QUEUE_DEPTH;
     config.ethernet_tx_depth = (uint8_t)wlh_transport_tx_capacity();
@@ -138,6 +152,10 @@ int wlh_app_init(void) {
 
     if (wlh_coproc_start(&coproc) != WLH_COPROC_OK) {
         WLH_LOGE(TAG, "coproc start failed");
+        return -1;
+    }
+    if (wlh_eth_backend_init(&coproc) != 0) {
+        WLH_LOGE(TAG, "eth backend init failed");
         return -1;
     }
     if (wlh_transport_start(&transport_config) != 0) {

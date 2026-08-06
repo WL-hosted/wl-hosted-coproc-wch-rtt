@@ -1,6 +1,7 @@
 /* FinSH/MSH diagnostics for the WL-hosted coprocessor firmware. */
 #include <rtthread.h>
 
+#include "eth_backend.h"
 #include "transport.h"
 #include "wlh/coproc.h"
 #include "wlh_app.h"
@@ -65,5 +66,41 @@ static void cmd_usb_stats(int argc, char **argv) {
                (unsigned long)stats.rx_overruns,
                (unsigned long)stats.tx_frames,
                (unsigned long)stats.tx_failures);
+    rt_kprintf("rx_isr_packets=%lu rx_feed_frames=%lu rx_resync_bytes=%lu "
+               "rx_pauses=%lu\n",
+               (unsigned long)stats.rx_isr_packets,
+               (unsigned long)stats.rx_feed_frames,
+               (unsigned long)stats.rx_resync_bytes,
+               (unsigned long)stats.rx_pauses);
+    {
+        extern volatile uint32_t g_usbhs_rx_tog_drops;
+        rt_kprintf("rx_tog_drops=%lu\n", (unsigned long)g_usbhs_rx_tog_drops);
+    }
 }
 MSH_CMD_EXPORT_ALIAS(cmd_usb_stats, usb_stats, wl-hosted usb transport stats);
+
+static void cmd_eth_stats(int argc, char **argv) {
+    wlh_eth_stats_t stats;
+    (void)argc;
+    (void)argv;
+
+    wlh_eth_get_stats(&stats);
+    rt_kprintf("link=%s duplex=%s link_ups=%lu\n",
+               stats.link_up ? "up" : "down",
+               stats.duplex_full ? "full" : "half",
+               (unsigned long)stats.link_ups);
+    rt_kprintf("rx_frames=%lu rx_dropped=%lu rx_errors=%lu\n",
+               (unsigned long)stats.rx_frames,
+               (unsigned long)stats.rx_dropped,
+               (unsigned long)stats.rx_errors);
+    rt_kprintf("tx_frames=%lu tx_errors=%lu tx_rejected=%lu\n",
+               (unsigned long)stats.tx_frames,
+               (unsigned long)stats.tx_errors,
+               (unsigned long)stats.tx_rejected);
+    rt_kprintf("isr_rx=%lu isr_tx=%lu wakes=%lu empty_rx=%lu\n",
+               (unsigned long)stats.isr_rx,
+               (unsigned long)stats.isr_tx,
+               (unsigned long)stats.worker_wakes,
+               (unsigned long)stats.worker_empty_rx);
+}
+MSH_CMD_EXPORT_ALIAS(cmd_eth_stats, eth_stats, wl-hosted eth backend stats);

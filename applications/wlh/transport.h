@@ -39,6 +39,13 @@ typedef struct wlh_transport_stats {
     uint32_t tx_failures;
     uint32_t bus_resets;
     uint32_t configured;
+    /* RX pipeline drop-point accounting: isr packets enter the ring, feed
+     * frames leave towards the core; resync bytes are silently skipped by
+     * the plausibility scan, so isr-fed-resync explains every missing frame. */
+    uint32_t rx_isr_packets;
+    uint32_t rx_feed_frames;
+    uint32_t rx_resync_bytes;
+    uint32_t rx_pauses;
 } wlh_transport_stats_t;
 void wlh_transport_get_stats(wlh_transport_stats_t *stats);
 

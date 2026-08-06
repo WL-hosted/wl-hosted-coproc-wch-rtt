@@ -21,21 +21,26 @@
 #define WLH_USB_EP_MPS 512u
 #define WLH_USB_BUS_ID 0u
 
-/* 64 KiB RAM budget: a 2048-byte wire frame still fits a full 1518-byte L2
- * frame plus raw-record and wire headers; the host clamps its TX to the
- * negotiated minimum, so nothing larger ever arrives. */
+/* A 2048-byte wire frame still fits a full 1518-byte L2 frame plus
+ * raw-record and wire headers; the host clamps its TX to the negotiated
+ * minimum, so nothing larger ever arrives. */
 #define WLH_WIRE_MAX_FRAME_SIZE 2048u
 
-/* USB transport queueing (all bounded, all static). */
-#define WLH_USB_RX_RING_SIZE 4096u
+/* USB transport queueing (all bounded, all static). The RX ring absorbs one
+ * full credit window (6 x 1546-byte wire frames ~= 9.1 KiB would be tight);
+ * with NAK backpressure on the OUT endpoint its size only affects burst
+ * absorption, never correctness. */
+#define WLH_USB_RX_RING_SIZE 8192u
 #define WLH_USB_CONTROL_TX_QUEUE_DEPTH 4u
-#define WLH_USB_DATA_TX_QUEUE_DEPTH 12u
+#define WLH_USB_DATA_TX_QUEUE_DEPTH 8u
 #define WLH_USB_TX_TIMEOUT_MS 2000u
 
 /* Core sizing. initial_credit is the host->device in-flight window per data
- * channel; 8 x ~1.6 KiB worst-case buffers stay affordable. */
+ * channel. It must not exceed WLH_ETH_TX_DESC_NUM: a burst larger than the
+ * EMAC TX ring is REJECTED at the backend, which drops the frame (only the
+ * credit is returned) — invisible to UDP but fatal to TCP burst recovery. */
 #define WLH_CORE_QUEUE_DEPTH 16u
-#define WLH_INITIAL_CREDIT 8u
+#define WLH_INITIAL_CREDIT 6u
 #define WLH_ETHERNET_TX_DEPTH WLH_USB_DATA_TX_QUEUE_DEPTH
 #define WLH_ETHERNET_TX_AGGREGATION_LIMIT 1u
 #define WLH_HEARTBEAT_INTERVAL_MS 1000u
@@ -54,5 +59,20 @@
  * with more than one board on the same LAN must give each its own address. */
 #define WLH_ETH_MAC_ADDR \
     { 0x02, 0x57, 0x4c, 0x00, 0x00, 0x01 }
+
+/* Wired Ethernet backend: EMAC + internal 10BASE-T PHY (EXTEN_ETH_10M_EN),
+ * no RMII/RGMII pins. The internal PHY answers at SMI address 0x01 (same as
+ * the RT-Thread ch32 drv_eth default). Descriptor rings are static and
+ * bounded: 3 RX + 6 TX buffers of ETH_MAX_PACKET_SIZE (1536) ~= 13.8 KiB.
+ * TX depth 6 absorbs line-rate TCP bursts (10M wire time is ~1.2 ms/frame);
+ * WLH_INITIAL_CREDIT must stay <= this depth (see firmware_config above). */
+#define WLH_ETH_PHY_ADDR 0x01u
+#define WLH_ETH_RX_DESC_NUM 3u
+#define WLH_ETH_TX_DESC_NUM 6u
+#define WLH_ETH_RX_TASK_STACK 2048u
+#define WLH_ETH_RX_TASK_PRIORITY 9u
+#define WLH_ETH_LINK_TASK_STACK 1536u
+#define WLH_ETH_LINK_TASK_PRIORITY 15u
+#define WLH_ETH_LINK_POLL_MS 1000u
 
 #endif
