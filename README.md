@@ -1,6 +1,6 @@
 # wl-hosted-coproc-wch-rtt
 
-CH32V307VC + RT-Thread 5.0.3 的 WL-hosted 协处理器固件：CherryUSB device（USBHS，PB6/PB7，USB 2.0 HS）承载标准 Wire/RPC 帧，数据面为有线 Ethernet（channel 0x0a，片内 10M PHY）。宿主侧使用 `wl-hosted-host-macos-sim --usb 1a86:8210`。
+CH32V307VC / CH32V317WCU6 + RT-Thread 5.0.3 的 WL-hosted 协处理器固件：CherryUSB device（USBHS，PB6/PB7，USB 2.0 HS）承载标准 Wire/RPC 帧，数据面为有线 Ethernet（channel 0x0a）。V307 使用片内 10M PHY，V317W EVT 使用集成 10/100M PHY。宿主侧使用 `wl-hosted-host-macos-sim --usb 1a86:8210`。
 
 ## 依赖
 
@@ -23,12 +23,30 @@ scons --pyconfig-silent            # 重新生成 rtconfig.h
 
 # 源码/SConscript 变更后重新生成构建系统（CMakeLists.txt 为生成物，不入库）
 scons --target=cmake
-cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
-cmake --build build-debug --parallel
 
-cmake --build build-debug --target flash      # 仅 app（wlink）
-cmake --build build-debug --target flash_all  # bl_s1+app+bl_s2 合并烧录
+# 默认目标：CH32V307VC
+cmake -S . -B build-v307 -DCMAKE_BUILD_TYPE=Debug \
+  -DWLH_TARGET=ch32v307
+cmake --build build-v307 --parallel
+
+# CH32V317WCU6 EVT
+cmake -S . -B build-v317 -DCMAKE_BUILD_TYPE=Debug \
+  -DWLH_TARGET=ch32v317
+cmake --build build-v317 --parallel
+
+cmake --build build-v307 --target flash      # 仅 app（wlink）
+cmake --build build-v307 --target flash_all  # bl_s1+app+bl_s2 合并烧录
 ```
+
+`WLH_TARGET` 只接受 `ch32v307` 和 `ch32v317`，未指定时兼容默认到
+`ch32v307`。构建会生成带目标名的应用 ELF/HEX 和合并镜像，例如
+`wlhosted-ch32v317.elf`、`wlhosted-ch32v317.hex`、
+`wlhosted-ch32v317-all.hex`。
+
+V317 PHY 初始化参考 WCH EVT 的
+`EXAM/ETH/MAC_RAW/ETH_Driver/eth_driver_CH32V317.c`：ETH PLL3 为 100 MHz，
+使用 PD8/PE8–PE15 RMII 配置及官方 PHY 分页寄存器初始化。两目标共享当前
+SDK、USBHS、启动文件、分区和 bootloader。
 
 ## 布局
 

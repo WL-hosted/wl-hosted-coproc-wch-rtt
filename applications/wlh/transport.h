@@ -7,9 +7,9 @@
 #include "wlh/coproc.h"
 
 /* USB bulk transport for the WL-hosted wire protocol (CherryUSB device on
- * the CH32V307 USBHS controller). Same contract as the ESP-IDF adapter:
- * raw wire frames on the bulk byte stream, reassembled by the 24-byte frame
- * header; USB packet boundaries carry no frame semantics. */
+ * the CH32V307/CH32V317 USBHS controller). Same contract as the ESP-IDF
+ * adapter: raw wire frames on the bulk byte stream, reassembled by the
+ * 24-byte frame header; USB packet boundaries carry no frame semantics. */
 
 typedef void (*wlh_transport_reset_fn)(void *context);
 

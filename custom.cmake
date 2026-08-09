@@ -1,5 +1,33 @@
+# WL-hosted target profile. The SCons-generated project contains the common
+# CH32V30x source set; this cache option selects the application/PHY profile.
+set(WLH_TARGET "ch32v307" CACHE STRING "WL-hosted WCH target")
+set_property(CACHE WLH_TARGET PROPERTY STRINGS ch32v307 ch32v317)
+
+if(WLH_TARGET STREQUAL "ch32v307")
+    target_compile_definitions(rtt_wlh PRIVATE WLH_TARGET_CH32V307=1)
+elseif(WLH_TARGET STREQUAL "ch32v317")
+    target_compile_definitions(rtt_wlh PRIVATE WLH_TARGET_CH32V317=1)
+else()
+    message(FATAL_ERROR
+        "Unsupported WLH_TARGET='${WLH_TARGET}'; expected ch32v307 or ch32v317"
+    )
+endif()
+target_compile_options(rtt_wlh PRIVATE -Wall -Werror)
+
+set(_WLHOSTED_ARTIFACT_STEM "wlhosted-${WLH_TARGET}")
+add_custom_command(TARGET ${CMAKE_PROJECT_NAME}.elf POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_BINARY_DIR}/rtthread.elf
+        ${CMAKE_CURRENT_BINARY_DIR}/${_WLHOSTED_ARTIFACT_STEM}.elf
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_CURRENT_BINARY_DIR}/rtthread.hex
+        ${CMAKE_CURRENT_BINARY_DIR}/${_WLHOSTED_ARTIFACT_STEM}.hex
+    COMMENT "Create ${WLH_TARGET} firmware artifacts"
+    VERBATIM
+)
+
 # 通过 WCH-Link (wlink) 下载固件到芯片 flash。
-# 用法：cmake --build build-debug --target flash
+# 用法：cmake --build <build-dir> --target flash
 # 下载 hex 格式固件（由 rtconfig.py 的 POST_ACTION 在构建后生成），
 # 地址由 hex 记录携带（0x08000000），无需指定基地址。
 add_custom_target(flash
@@ -52,7 +80,7 @@ ExternalProject_Add(bl_s2
     BUILD_ALWAYS ON
 )
 
-# merge_hex: 合并 bl_s1 + rtthread(app) + bl_s2 三个 hex 为 wlhosted_all.hex，不烧录。
+# merge_hex: 合并 bl_s1 + rtthread(app) + bl_s2 三个 hex，不烧录。
 # 需要 mergehex-rs（https://crates.io/crates/mergehex-rs）；PATH 中找不到时
 # 可 -DMERGEHEX=/path/to/mergehex-rs 显式指定。
 find_program(MERGEHEX mergehex-rs)
@@ -60,7 +88,9 @@ if(NOT MERGEHEX)
     message(FATAL_ERROR "merge_hex/flash_all requires mergehex-rs; install it or pass -DMERGEHEX=/path/to/mergehex-rs")
 endif()
 
-set(_WLHOSTED_MERGED_HEX ${CMAKE_CURRENT_BINARY_DIR}/wlhosted_all.hex)
+set(_WLHOSTED_MERGED_HEX
+    ${CMAKE_CURRENT_BINARY_DIR}/${_WLHOSTED_ARTIFACT_STEM}-all.hex
+)
 
 add_custom_target(merge_hex
     DEPENDS bl_s1 bl_s2 ${CMAKE_PROJECT_NAME}.elf

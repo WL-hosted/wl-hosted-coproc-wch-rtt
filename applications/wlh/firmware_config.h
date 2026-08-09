@@ -1,14 +1,30 @@
 #ifndef WLH_FIRMWARE_CONFIG_H
 #define WLH_FIRMWARE_CONFIG_H
 
-/* Single source for the tunables of the WL-hosted CH32V307 coprocessor
+/* Single source for the tunables of the WL-hosted CH32V30x coprocessor
  * firmware. The USB identity must stay in sync with the host side
  * (wl-hosted-host-macos-sim --usb <vid:pid>, hardcoded interface 0 and
  * endpoints 0x01/0x81). */
 
+#if defined(WLH_TARGET_CH32V307) && defined(WLH_TARGET_CH32V317)
+#error "select exactly one WLH WCH target"
+#elif !defined(WLH_TARGET_CH32V307) && !defined(WLH_TARGET_CH32V317)
+/* Preserve the historical direct-SCons build behavior. CMake injects one of
+ * the target macros explicitly through custom.cmake. */
+#define WLH_TARGET_CH32V307 1
+#endif
+
+#if defined(WLH_TARGET_CH32V317)
+#define WLH_MCU_NAME "CH32V317WCU6"
+#define WLH_BOARD_PROFILE "wch.ch32v317w.evt.usb-eth"
+#define WLH_USB_PRODUCT_STRING "WL-hosted CH32V317 Coprocessor"
+#else
 #define WLH_MCU_NAME "CH32V307VC"
-#define WLH_TRANSPORT_NAME "usb-hs"
 #define WLH_BOARD_PROFILE "wch.ch32v307.custom.usb-eth"
+#define WLH_USB_PRODUCT_STRING "WL-hosted CH32V307 Coprocessor"
+#endif
+
+#define WLH_TRANSPORT_NAME "usb-hs"
 #define WLH_IMPLEMENTATION_VERSION "0.1.0"
 
 #define WLH_USB_VID 0x1A86u
@@ -60,12 +76,11 @@
 #define WLH_ETH_MAC_ADDR \
     { 0x02, 0x57, 0x4c, 0x00, 0x00, 0x01 }
 
-/* Wired Ethernet backend: EMAC + internal 10BASE-T PHY (EXTEN_ETH_10M_EN),
- * no RMII/RGMII pins. The internal PHY answers at SMI address 0x01 (same as
- * the RT-Thread ch32 drv_eth default). Descriptor rings are static and
- * bounded: 3 RX + 6 TX buffers of ETH_MAX_PACKET_SIZE (1536) ~= 13.8 KiB.
- * TX depth 6 absorbs line-rate TCP bursts (10M wire time is ~1.2 ms/frame);
- * WLH_INITIAL_CREDIT must stay <= this depth (see firmware_config above). */
+/* Wired Ethernet backend. Both targets use SMI address 0x01: CH32V307 uses
+ * its internal 10BASE-T PHY, while CH32V317W uses the integrated 10/100M PHY
+ * through its documented RMII pin configuration. Descriptor rings are
+ * static and bounded: 3 RX + 6 TX buffers of ETH_MAX_PACKET_SIZE (1536) ~=
+ * 13.8 KiB. WLH_INITIAL_CREDIT must stay <= the TX depth. */
 #define WLH_ETH_PHY_ADDR 0x01u
 #define WLH_ETH_RX_DESC_NUM 3u
 #define WLH_ETH_TX_DESC_NUM 6u

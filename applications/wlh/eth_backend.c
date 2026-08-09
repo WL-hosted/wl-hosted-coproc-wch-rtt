@@ -5,11 +5,18 @@
 
 #include <board.h>
 #include <ch32v30x.h>
+/* TODO(wch-sdk): SDK v2.7 ch32v30x_eth.h has nested comment openers around
+ * its register sections. Remove this local suppression when the vendored SDK
+ * fixes those comments; application warnings remain covered by -Werror. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcomment"
 #include <ch32v30x_eth.h>
+#pragma GCC diagnostic pop
 #include <ch32v30x_it.h>
 #include <rthw.h>
 #include <rtthread.h>
 
+#include "eth_phy.h"
 #include "firmware_config.h"
 #include "wlh/log.h"
 
@@ -43,7 +50,9 @@ static eth_tx_slot_t s_tx_slots[WLH_ETH_TX_DESC_NUM];
 static uint32_t s_tx_next;
 
 static volatile uint8_t s_link_up;
-static volatile uint8_t s_duplex_full = 1u;
+static volatile uint8_t s_duplex_full;
+static volatile wlh_coproc_eth_speed_t s_link_speed =
+    WLH_COPROC_ETH_SPEED_UNSPECIFIED;
 /* Set by the USB transport the instant a reset is observed; cleared by the
  * app only after the core has been restarted. While set, no core API may be
  * called from the ETH worker or link thread: the core is being torn down and
@@ -100,8 +109,7 @@ static void emac_mac_config(void) {
                          init.ETH_AutomaticPadCRCStrip |
                          init.ETH_BackOffLimit | init.ETH_DeferralCheck);
     ETH->MACCR = tmpreg;
-    /* Required for the internal 10BASE-T PHY: enable the 50 ohm pull-up. */
-    ETH->MACCR |= ETH_Internal_Pull_Up_Res_Enable;
+    wlh_eth_phy_configure_mac();
 
     ETH->MACFFR = (uint32_t)(init.ETH_ReceiveAll | init.ETH_SourceAddrFilter |
                              init.ETH_PassControlFrames |
@@ -144,56 +152,8 @@ static void emac_mac_config(void) {
 }
 
 static int emac_init(void) {
-    rt_tick_t start;
-
-    /* ETHCLK: HSE 8 MHz -> PREDIV2 /2 -> PLL3 x15 = 60 MHz (same recipe as
-     * drv_eth). The MAC clock domain does not run without it: the DMA
-     * software-reset bit never clears. PLL3 is otherwise unused (USBHS runs
-     * off its own HSE-referenced PLL), so there is no clock conflict. */
-    RCC_PLL3Cmd(DISABLE);
-    RCC_PREDIV2Config(RCC_PREDIV2_Div2);
-    RCC_PLL3Config(RCC_PLL3Mul_15);
-    RCC_PLL3Cmd(ENABLE);
-    start = rt_tick_get_millisecond();
-    while (RCC_GetFlagStatus(RCC_FLAG_PLL3RDY) == RESET) {
-        if ((rt_tick_get_millisecond() - start) > 500u) {
-            WLH_LOGE(TAG, "pll3 lock timeout");
-            return -1;
-        }
-    }
-
-    RCC_AHBPeriphClockCmd(
-        RCC_AHBPeriph_ETH_MAC | RCC_AHBPeriph_ETH_MAC_Tx |
-            RCC_AHBPeriph_ETH_MAC_Rx,
-        ENABLE
-    );
-    /* Internal 10BASE-T PHY; no RMII/RGMII GPIO needed. */
-    EXTEN->EXTEN_CTR |= EXTEN_ETH_10M_EN;
-
-    ETH_DeInit();
-    ETH_SoftwareReset();
-    start = rt_tick_get_millisecond();
-    while (ETH->DMABMR & ETH_DMABMR_SR) {
-        if ((rt_tick_get_millisecond() - start) > 500u) {
-            WLH_LOGE(TAG, "emac software reset timeout");
-            return -1;
-        }
-    }
-
-    /* SMI clock HCLK/42, matching drv_eth. */
-    ETH->MACMIIAR =
-        (ETH->MACMIIAR & MACMIIAR_CR_MASK) | (uint32_t)ETH_MACMIIAR_CR_Div42;
-
-    ETH_WritePHYRegister(WLH_ETH_PHY_ADDR, PHY_BCR, PHY_Reset);
-    rt_thread_mdelay(50);
-    start = rt_tick_get_millisecond();
-    while (ETH_ReadPHYRegister(WLH_ETH_PHY_ADDR, PHY_BCR) & PHY_Reset) {
-        if ((rt_tick_get_millisecond() - start) > 500u) {
-            WLH_LOGE(TAG, "phy reset timeout");
-            return -1;
-        }
-        rt_thread_mdelay(10);
-    }
+    if (wlh_eth_phy_init() != 0)
+        return -1;
 
     emac_mac_config();
     ETH_MACAddressConfig(ETH_MAC_Address0, (uint8_t *)s_mac);
@@ -347,9 +307,7 @@ static void eth_worker_thread(void *parameter) {
     }
 }
 
-/* Tracks the internal PHY link once per second; the link status bit in BSR is
- * latched-low, so it is read twice per poll. Speed is fixed at 10M (the only
- * mode the internal PHY supports); duplex follows BMCR bit 8 like drv_eth.
+/* Tracks the selected PHY link and negotiated mode once per second.
  *
  * Link events are only reported while a host session is READY: pre-session
  * the CONTROL_RPC channel has no credit, and a failed send would flip the
@@ -367,7 +325,7 @@ static void eth_link_report(int up) {
         wlh_coproc_eth_link_state_changed(
             s_coproc,
             WLH_COPROC_ETH_LINK_STATE_UP,
-            WLH_COPROC_ETH_SPEED_10M,
+            s_link_speed,
             s_duplex_full ? WLH_COPROC_ETH_DUPLEX_FULL
                           : WLH_COPROC_ETH_DUPLEX_HALF
         );
@@ -382,37 +340,51 @@ static void eth_link_report(int up) {
 }
 
 static void eth_link_thread(void *parameter) {
-    int last_up = 0;
+    wlh_eth_phy_status_t status;
+    uint8_t last_up = 0u;
+    uint8_t last_duplex = 0u;
+    uint16_t last_speed = 0u;
     (void)parameter;
     for (;;) {
-        uint16_t bsr;
-        int up;
+        int changed;
+        uint8_t was_up;
 
         rt_thread_mdelay(WLH_ETH_LINK_POLL_MS);
-        (void)ETH_ReadPHYRegister(WLH_ETH_PHY_ADDR, PHY_BSR);
-        bsr = ETH_ReadPHYRegister(WLH_ETH_PHY_ADDR, PHY_BSR);
-        up = (bsr & PHY_Linked_Status) != 0u;
-        if (up == last_up)
+        wlh_eth_phy_read_status(&status);
+        was_up = last_up;
+        changed = status.link_up != last_up;
+        if (status.link_up &&
+            (status.speed_mbps != last_speed ||
+             status.full_duplex != last_duplex)) {
+            changed = 1;
+        }
+        if (!changed)
             continue;
-        last_up = up;
-        s_link_up = (uint8_t)up;
-        if (up) {
-            uint16_t bmcr = ETH_ReadPHYRegister(WLH_ETH_PHY_ADDR, PHY_BMCR);
-            s_duplex_full = (bmcr & (1u << 8)) != 0u ? 1u : 0u;
-            if (s_duplex_full)
-                ETH->MACCR |= ETH_Mode_FullDuplex;
-            else
-                ETH->MACCR &= ~(uint32_t)ETH_Mode_FullDuplex;
-            s_stats.link_ups++;
+        last_up = status.link_up;
+        last_speed = status.speed_mbps;
+        last_duplex = status.full_duplex;
+        s_link_up = status.link_up;
+        s_duplex_full = status.full_duplex;
+        if (status.speed_mbps == 100u)
+            s_link_speed = WLH_COPROC_ETH_SPEED_100M;
+        else if (status.speed_mbps == 10u)
+            s_link_speed = WLH_COPROC_ETH_SPEED_10M;
+        else
+            s_link_speed = WLH_COPROC_ETH_SPEED_UNSPECIFIED;
+        if (status.link_up) {
+            if (!was_up)
+                s_stats.link_ups++;
             WLH_LOGI(
                 TAG,
-                "link up (10M %s duplex)",
+                "link up (%uM %s duplex)",
+                (unsigned int)status.speed_mbps,
                 s_duplex_full ? "full" : "half"
             );
         } else {
+            s_link_speed = WLH_COPROC_ETH_SPEED_UNSPECIFIED;
             WLH_LOGI(TAG, "link down");
         }
-        eth_link_report(up);
+        eth_link_report(status.link_up);
     }
 }
 
@@ -424,9 +396,10 @@ int wlh_eth_get_info(void *context, uint32_t operation_id) {
     info.link_state = s_link_up ? WLH_COPROC_ETH_LINK_STATE_UP
                                 : WLH_COPROC_ETH_LINK_STATE_DOWN;
     memcpy(info.mac_address, s_mac, sizeof(info.mac_address));
-    info.speed = WLH_COPROC_ETH_SPEED_10M;
-    info.duplex = s_duplex_full ? WLH_COPROC_ETH_DUPLEX_FULL
-                                : WLH_COPROC_ETH_DUPLEX_HALF;
+    info.speed = s_link_up ? s_link_speed : WLH_COPROC_ETH_SPEED_UNSPECIFIED;
+    info.duplex = s_link_up ? (s_duplex_full ? WLH_COPROC_ETH_DUPLEX_FULL
+                                             : WLH_COPROC_ETH_DUPLEX_HALF)
+                            : WLH_COPROC_ETH_DUPLEX_UNSPECIFIED;
     /* Runs on the core task; the completion is queued, so answering inline is
      * safe and keeps the whole operation nonblocking. */
     wlh_coproc_eth_info_ready(s_coproc, operation_id, 0, &info);
@@ -551,8 +524,8 @@ int wlh_eth_backend_init(wlh_coproc_t *coproc) {
     rt_thread_startup(thread);
     WLH_LOGI(
         TAG,
-        "eth backend started (internal 10M PHY, mac %02x:%02x:%02x:%02x:%02x:"
-        "%02x)",
+        "eth backend started (%s, mac %02x:%02x:%02x:%02x:%02x:%02x)",
+        wlh_eth_phy_name(),
         s_mac[0],
         s_mac[1],
         s_mac[2],

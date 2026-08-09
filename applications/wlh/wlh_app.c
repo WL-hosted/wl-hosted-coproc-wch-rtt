@@ -1,5 +1,5 @@
 /*
- * WL-hosted coprocessor application assembly for CH32V307 + RT-Thread.
+ * WL-hosted coprocessor application assembly for CH32V30x + RT-Thread.
  * Mirrors wl-hosted-coproc-esp-idf main/app/app_main.c: OSAL -> config ->
  * coproc init/start -> transport start -> link-reset thread.
  */
@@ -40,7 +40,7 @@ static int get_device_info(void *context, wlh_coproc_device_info_t *info) {
     strncpy(
         info->board_profile, WLH_BOARD_PROFILE, sizeof(info->board_profile) - 1u
     );
-    /* The CH32V307 has no factory unique ID; keep uid hidden. */
+    /* Keep uid hidden until the adapter has a stable per-device identifier. */
     info->uid_size = 0u;
     return 0;
 }

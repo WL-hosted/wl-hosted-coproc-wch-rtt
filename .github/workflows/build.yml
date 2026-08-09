@@ -8,7 +8,16 @@ on:
 
 jobs:
   build:
+    name: Build ${{ matrix.target }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: ch32v307
+            mcu_name: CH32V307VC
+          - target: ch32v317
+            mcu_name: CH32V317WCU6
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,40 +45,28 @@ jobs:
         run: scons --target=cmake
 
       - name: Configure CMake
-        run: cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug
+        run: >-
+          cmake -S . -B build-${{ matrix.target }}
+          -DCMAKE_BUILD_TYPE=Debug
+          -DWLH_TARGET=${{ matrix.target }}
 
-      - name: Build
-        run: cmake --build build-debug --parallel
-
-      - name: Build bl_s1 (stage-1 bootloader)
-        run: |
-          cmake -S bl_s1 -B bl_s1/build-debug -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_ASM_COMPILER="$RTT_EXEC_PATH/riscv32-wch-elf-gcc" \
-            -DCMAKE_OBJCOPY="$RTT_EXEC_PATH/riscv32-wch-elf-objcopy" \
-            -DCMAKE_SIZE="$RTT_EXEC_PATH/riscv32-wch-elf-size"
-          cmake --build bl_s1/build-debug --parallel
-
-      - name: Build bl_s2 (stage-2 bootloader)
-        run: |
-          cmake -S bl_s2 -B bl_s2/build-debug -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_C_COMPILER="$RTT_EXEC_PATH/riscv32-wch-elf-gcc" \
-            -DCMAKE_ASM_COMPILER="$RTT_EXEC_PATH/riscv32-wch-elf-gcc" \
-            -DCMAKE_AR="$RTT_EXEC_PATH/riscv32-wch-elf-ar" \
-            -DCMAKE_RANLIB="$RTT_EXEC_PATH/riscv32-wch-elf-ranlib" \
-            -DCMAKE_OBJCOPY="$RTT_EXEC_PATH/riscv32-wch-elf-objcopy" \
-            -DCMAKE_SIZE="$RTT_EXEC_PATH/riscv32-wch-elf-size"
-          cmake --build bl_s2/build-debug --parallel
-
-      - name: Merge bl_s1 + rtthread + bl_s2 into wlhosted_all.hex
+      - name: Build app and merged firmware
         # flash_all also flashes via wlink (needs hardware), so only build merge_hex
-        run: cmake --build build-debug --target merge_hex --parallel
+        run: >-
+          cmake --build build-${{ matrix.target }}
+          --target merge_hex --parallel
+
+      - name: Verify target identity
+        run: >-
+          strings build-${{ matrix.target }}/wlhosted-${{ matrix.target }}.elf
+          | grep -F "${{ matrix.mcu_name }}"
 
       - name: Upload firmware artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rtthread-firmware
+          name: wlhosted-${{ matrix.target }}-firmware
           path: |
-            build-debug/wlhosted_all.hex
-            build-debug/rtthread.hex
-            build-debug/rtthread.elf
+            build-${{ matrix.target }}/wlhosted-${{ matrix.target }}-all.hex
+            build-${{ matrix.target }}/wlhosted-${{ matrix.target }}.hex
+            build-${{ matrix.target }}/wlhosted-${{ matrix.target }}.elf
           if-no-files-found: error

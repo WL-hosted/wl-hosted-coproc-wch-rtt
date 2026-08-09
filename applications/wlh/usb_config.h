@@ -1,5 +1,5 @@
 /*
- * CherryUSB stack configuration for the CH32V307 USBHS device build.
+ * CherryUSB stack configuration for CH32V307/CH32V317 USBHS device builds.
  * Referenced by rt-thread/components/drivers/usb/cherryusb (usb_config.h is
  * resolved through the applications/wlh include path).
  */
@@ -14,7 +14,7 @@
 #define CONFIG_USB_DBG_LEVEL USB_DBG_INFO
 #endif
 
-/* No D-Cache on the CH32V307; DMA buffers only need 4-byte alignment. */
+/* No D-Cache on these targets; DMA buffers only need 4-byte alignment. */
 #define CONFIG_USB_ALIGN_SIZE 4
 
 /* No non-cacheable RAM region on this part; the attribute expands to

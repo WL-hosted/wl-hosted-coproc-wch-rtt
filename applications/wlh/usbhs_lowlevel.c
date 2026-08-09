@@ -1,4 +1,4 @@
-/* CH32V307 USBHS low-level glue for the CherryUSB ch32 port.
+/* CH32V307/CH32V317 USBHS low-level glue for the CherryUSB ch32 port.
  * Clock recipe follows the WCH EVT USBHS device examples and the
  * cherryusb_wch demo (HSE = 8 MHz on this board). */
 #include "usbhs_lowlevel.h"

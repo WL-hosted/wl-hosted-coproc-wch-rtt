@@ -1,6 +1,6 @@
 /*
  * WL-hosted wire protocol over a CherryUSB vendor bulk interface on the
- * CH32V307 USBHS controller (PB6/PB7, USB 2.0 High Speed).
+ * CH32V307/CH32V317 USBHS controller (PB6/PB7, USB 2.0 High Speed).
  *
  * Mirrors the ESP-IDF adapter (wl-hosted-coproc-esp-idf
  * main/transports/usb/transport_usb.c): raw wire frames on the bulk byte
@@ -137,7 +137,7 @@ static const char *string_descriptor_callback(uint8_t speed, uint8_t index) {
     static const char *strings[] = {
         langid_string,
         "WL-hosted",
-        "WL-hosted CH32V307 Coprocessor",
+        WLH_USB_PRODUCT_STRING,
         serial_string,
     };
     (void)speed;

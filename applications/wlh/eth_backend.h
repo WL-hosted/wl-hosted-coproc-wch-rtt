@@ -1,11 +1,10 @@
-/* Wired Ethernet backend for the WL-hosted CH32V307 coprocessor: EMAC with
- * the internal 10BASE-T PHY, bridged to the host over the ETH service and
- * the ETHERNET_ETH data channel of wl-hosted-core/coproc-core.
+/* Wired Ethernet backend for WL-hosted CH32V307/CH32V317 coprocessors: EMAC
+ * plus the selected integrated PHY, bridged to the host over the ETH service
+ * and the ETHERNET_ETH data channel of wl-hosted-core/coproc-core.
  *
- * Register programming follows the RT-Thread ch32 drv_eth.c driver
- * (libraries/ch32_drivers/drv_eth.c, USE10BASE_T path), restructured so that
- * no step blocks indefinitely: PHY reset is bounded and link/autonegotiation
- * is tracked by a 1 s poll thread instead of init-time busy waits. */
+ * Register programming follows the WCH reference drivers, restructured so
+ * that no step blocks indefinitely: PHY reset is bounded and link state is
+ * tracked by a poll thread instead of init-time busy waits. */
 #ifndef WLH_ETH_BACKEND_H
 #define WLH_ETH_BACKEND_H
 
@@ -29,7 +28,7 @@ typedef struct wlh_eth_stats {
     uint8_t duplex_full;
 } wlh_eth_stats_t;
 
-/* Initialises the EMAC + internal PHY and starts the RX/link threads. The
+/* Initialises the EMAC + selected PHY and starts the RX/link threads. The
  * MAC perfect-filters unicast to our own address (broadcast/multicast pass);
  * host-side filtering applies on top. Callable once from wlh_app_init after
  * wlh_coproc_init. */
