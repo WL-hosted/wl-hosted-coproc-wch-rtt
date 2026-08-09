@@ -17,6 +17,24 @@
 #define TAG "wlh-phy"
 #define PHY_BMCR_FULL_DUPLEX (1u << 8)
 #define PHY_BMCR_SPEED_100M (1u << 13)
+#define PHY_ANAR_SYMMETRIC_PAUSE (1u << 10)
+
+static void advertise_symmetric_pause(void) {
+    uint16_t anar = ETH_ReadPHYRegister(WLH_ETH_PHY_ADDR, PHY_ANAR);
+    uint16_t bmcr;
+
+    if ((anar & PHY_ANAR_SYMMETRIC_PAUSE) != 0u)
+        return;
+    ETH_WritePHYRegister(
+        WLH_ETH_PHY_ADDR, PHY_ANAR, anar | PHY_ANAR_SYMMETRIC_PAUSE
+    );
+    bmcr = ETH_ReadPHYRegister(WLH_ETH_PHY_ADDR, PHY_BMCR);
+    if ((bmcr & PHY_AutoNegotiation) != 0u) {
+        ETH_WritePHYRegister(
+            WLH_ETH_PHY_ADDR, PHY_BMCR, bmcr | PHY_Restart_AutoNegotiation
+        );
+    }
+}
 
 static int wait_for_pll3(void) {
     rt_tick_t start = rt_tick_get_millisecond();
@@ -137,6 +155,7 @@ int wlh_eth_phy_init(void) {
     if (reset_emac_and_phy() != 0)
         return -1;
     configure_v317_phy();
+    advertise_symmetric_pause();
     return 0;
 }
 
@@ -162,7 +181,10 @@ int wlh_eth_phy_init(void) {
         return -1;
 
     EXTEN->EXTEN_CTR |= EXTEN_ETH_10M_EN;
-    return reset_emac_and_phy();
+    if (reset_emac_and_phy() != 0)
+        return -1;
+    advertise_symmetric_pause();
+    return 0;
 }
 
 void wlh_eth_phy_configure_mac(void) {

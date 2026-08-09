@@ -116,6 +116,7 @@ int wlh_app_init(void) {
     config.port.context = RT_NULL;
     config.port.submit_tx = wlh_transport_submit_tx;
     config.port.ethernet_eth_rx = wlh_eth_rx_from_core;
+    config.port.ethernet_tx_ready = wlh_eth_tx_ready;
     config.buffers = (wlh_coproc_buffer_ops_t){RT_NULL, buffer_alloc, buffer_free};
     config.osal = wlh_rtt_osal_ops(&rtt_osal);
     config.device_info =

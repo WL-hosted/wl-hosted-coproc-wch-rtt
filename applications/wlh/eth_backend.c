@@ -58,6 +58,15 @@ static volatile wlh_coproc_eth_speed_t s_link_speed =
  * called from the ETH worker or link thread: the core is being torn down and
  * its queue/mutex objects vanish under any in-flight call. */
 static volatile uint8_t s_transport_dead;
+/* A NO_CREDIT result leaves s_rx_cur CPU-owned until the Core signals usable
+ * credit. The semaphore is counting, so a notification that arrives before
+ * the worker blocks remains latched and cannot be missed. */
+static volatile uint8_t s_rx_backpressured;
+/* Set only by Core's ready callback. TX/link notifications may still wake the
+ * shared worker while a descriptor is retained, but must not cause another
+ * admission attempt until this flag supplies new usable credit. */
+static volatile uint8_t s_rx_credit_ready;
+static volatile uint8_t s_pause_active;
 static const uint8_t s_mac[6] = WLH_ETH_MAC_ADDR;
 static wlh_eth_stats_t s_stats;
 
@@ -85,6 +94,10 @@ static void emac_mac_config(void) {
     init.ETH_PromiscuousMode = ETH_PromiscuousMode_Disable;
     init.ETH_MulticastFramesFilter = ETH_MulticastFramesFilter_None;
     init.ETH_UnicastFramesFilter = ETH_UnicastFramesFilter_Perfect;
+    init.ETH_PauseTime = WLH_ETH_PAUSE_QUANTA;
+    init.ETH_ZeroQuantaPause = ETH_ZeroQuantaPause_Enable;
+    init.ETH_PauseLowThreshold = ETH_PauseLowThreshold_Minus28;
+    init.ETH_TransmitFlowControl = ETH_TransmitFlowControl_Enable;
     init.ETH_DropTCPIPChecksumErrorFrame =
         ETH_DropTCPIPChecksumErrorFrame_Enable;
     init.ETH_ReceiveStoreForward = ETH_ReceiveStoreForward_Enable;
@@ -181,24 +194,36 @@ static int emac_init(void) {
 void ETH_IRQHandler(void) __attribute__((interrupt("WCH-Interrupt-fast")));
 void ETH_IRQHandler(void) {
     uint32_t sr;
+    int wake_worker = 0;
     GET_INT_SP();
     rt_interrupt_enter();
     sr = ETH->DMASR;
     if (sr & ETH_DMA_IT_R) {
         s_stats.isr_rx++;
+        if (!s_rx_backpressured)
+            wake_worker = 1;
         ETH_DMAClearITPendingBit(ETH_DMA_IT_R);
     }
     if (sr & ETH_DMA_IT_T) {
         s_stats.isr_tx++;
+        wake_worker = 1;
         ETH_DMAClearITPendingBit(ETH_DMA_IT_T);
     }
-    if (sr & ETH_DMA_IT_RBU)
+    if (sr & ETH_DMA_IT_RBU) {
+        s_stats.isr_rbu++;
+        if (!s_rx_backpressured)
+            wake_worker = 1;
         ETH_DMAClearITPendingBit(ETH_DMA_IT_RBU);
-    if (sr & ETH_DMA_IT_AIS)
+    }
+    if (sr & ETH_DMA_IT_AIS) {
+        if (!s_rx_backpressured)
+            wake_worker = 1;
         ETH_DMAClearITPendingBit(ETH_DMA_IT_AIS);
+    }
     if (sr & ETH_DMA_IT_NIS)
         ETH_DMAClearITPendingBit(ETH_DMA_IT_NIS);
-    rt_sem_release(s_eth_sem);
+    if (wake_worker)
+        rt_sem_release(s_eth_sem);
     rt_interrupt_leave();
     FREE_INT_SP();
 }
@@ -233,9 +258,47 @@ static void eth_tx_complete_scan(void) {
     }
 }
 
-/* Moves every received frame into the core. Runs on the ETH worker thread;
- * the core copies the frame synchronously, so the descriptor can be re-armed
- * immediately after wlh_coproc_ethernet_eth_send returns.
+static int eth_flow_control_request(uint16_t pause_quanta) {
+    uint32_t macfcr;
+
+    if (!s_link_up || !s_duplex_full)
+        return 0;
+    macfcr = ETH->MACFCR;
+    /* FCBBPA remains set while the MAC is emitting the previous control
+     * frame. Do not overwrite its quanta in flight; a later ETH/core wake
+     * retries the zero-quanta resume if necessary. */
+    if ((macfcr & ETH_MACFCR_FCBBPA) != 0u)
+        return 0;
+    macfcr &= ~ETH_MACFCR_PT;
+    macfcr |= ((uint32_t)pause_quanta << 16) | ETH_MACFCR_TFCE;
+    ETH->MACFCR = macfcr;
+    ETH_InitiatePauseControlFrame();
+    if (pause_quanta != 0u)
+        s_stats.pause_frames++;
+    else
+        s_stats.resume_frames++;
+    return 1;
+}
+
+static void eth_pause_upstream(void) {
+    if (!s_link_up || !s_duplex_full)
+        return;
+    s_pause_active = 1u;
+    /* The official WCH USB-network examples use the same 0xf0 quanta value;
+     * a zero-quanta frame below releases the peer as soon as credit returns. */
+    eth_flow_control_request(WLH_ETH_PAUSE_QUANTA);
+}
+
+static void eth_resume_upstream(void) {
+    if (s_pause_active && eth_flow_control_request(0u))
+        s_pause_active = 0u;
+}
+
+/* Moves every received frame into the core. Runs on the ETH worker thread.
+ * Core copies accepted frames synchronously. A NO_CREDIT result is different:
+ * the descriptor stays CPU-owned and therefore retains the original frame
+ * until credit returns, providing ownership-based backpressure without a
+ * second copy.
  *
  * Frames are only forwarded while a host session is READY. The MAC still
  * receives broadcast/multicast LAN chatter even with no host attached;
@@ -246,6 +309,7 @@ static void eth_rx_drain(void) {
     wlh_coproc_diagnostics_t diag;
     int ready;
     int drained = 0;
+    int blocked = 0;
 
     /* While the transport is dead the core is being stopped and even
      * get_diagnostics would touch destroyed objects; drain and re-arm
@@ -254,7 +318,7 @@ static void eth_rx_drain(void) {
         ready = 0;
     } else {
         wlh_coproc_get_diagnostics(s_coproc, &diag);
-        ready = diag.state == WLH_COPROC_STATE_READY;
+        ready = diag.state == WLH_COPROC_STATE_READY && s_link_up;
     }
     for (;;) {
         ETH_DMADESCTypeDef *desc = s_rx_cur;
@@ -277,10 +341,20 @@ static void eth_rx_drain(void) {
             if (len >= 4u)
                 len -= 4u; /* strip the trailing CRC */
             if (ready && len >= WLH_ETH_MIN_FRAME && len <= WLH_ETH_MAX_FRAME) {
-                if (wlh_coproc_ethernet_eth_send(
-                        s_coproc, (uint8_t *)desc->Buffer1Addr, len
-                    ) == WLH_COPROC_OK) {
+                wlh_coproc_result_t result = wlh_coproc_ethernet_eth_send(
+                    s_coproc, (uint8_t *)desc->Buffer1Addr, len
+                );
+                if (result == WLH_COPROC_OK) {
                     s_stats.rx_frames++;
+                } else if (result == WLH_COPROC_NO_CREDIT) {
+                    if (s_rx_backpressured)
+                        s_stats.rx_retries++;
+                    else
+                        s_stats.rx_backpressure++;
+                    s_rx_backpressured = 1u;
+                    blocked = 1;
+                    eth_pause_upstream();
+                    break;
                 } else {
                     s_stats.rx_dropped++;
                 }
@@ -293,6 +367,12 @@ static void eth_rx_drain(void) {
         desc->Status = ETH_DMARxDesc_OWN;
         s_rx_cur = (ETH_DMADESCTypeDef *)desc->Buffer2NextDescAddr;
     }
+    if (!blocked && s_rx_backpressured) {
+        s_rx_backpressured = 0u;
+        eth_resume_upstream();
+    }
+    if (!s_rx_backpressured && s_pause_active)
+        eth_resume_upstream();
     if (drained == 0)
         s_stats.worker_empty_rx++;
 }
@@ -300,11 +380,32 @@ static void eth_rx_drain(void) {
 static void eth_worker_thread(void *parameter) {
     (void)parameter;
     for (;;) {
+        int retry_rx;
+        rt_base_t level;
+
+        /* Credit-ready, DMA and link notifications all use the same counting
+         * semaphore. Blocking forever is intentional: it avoids RT-Thread's
+         * timed-wait/release race and lets credit return wake the retained RX
+         * descriptor immediately instead of quantising every window to 1 ms. */
         rt_sem_take(s_eth_sem, RT_WAITING_FOREVER);
         s_stats.worker_wakes++;
         eth_tx_complete_scan();
-        eth_rx_drain();
+        level = rt_hw_interrupt_disable();
+        retry_rx = s_rx_credit_ready;
+        s_rx_credit_ready = 0u;
+        rt_hw_interrupt_enable(level);
+        if (!s_rx_backpressured || retry_rx || s_transport_dead || !s_link_up)
+            eth_rx_drain();
     }
+}
+
+void wlh_eth_tx_ready(void *context, uint8_t channel) {
+    (void)context;
+    if (channel != WLH_CHANNEL_ETHERNET_ETH || s_eth_sem == RT_NULL)
+        return;
+    s_rx_credit_ready = 1u;
+    s_stats.core_ready_wakes++;
+    rt_sem_release(s_eth_sem);
 }
 
 /* Tracks the selected PHY link and negotiated mode once per second.
@@ -365,6 +466,8 @@ static void eth_link_thread(void *parameter) {
         last_duplex = status.full_duplex;
         s_link_up = status.link_up;
         s_duplex_full = status.full_duplex;
+        if (!status.link_up || !status.full_duplex)
+            s_pause_active = 0u;
         if (status.speed_mbps == 100u)
             s_link_speed = WLH_COPROC_ETH_SPEED_100M;
         else if (status.speed_mbps == 10u)
@@ -385,6 +488,7 @@ static void eth_link_thread(void *parameter) {
             WLH_LOGI(TAG, "link down");
         }
         eth_link_report(status.link_up);
+        rt_sem_release(s_eth_sem);
     }
 }
 
@@ -468,10 +572,14 @@ void wlh_eth_transport_dead(void) {
     for (i = 0u; i < WLH_ETH_TX_DESC_NUM; i++)
         s_tx_slots[i].in_flight = 0u;
     rt_hw_interrupt_enable(level);
+    if (s_eth_sem != RT_NULL)
+        rt_sem_release(s_eth_sem);
 }
 
 void wlh_eth_transport_alive(void) {
     s_transport_dead = 0u;
+    if (s_eth_sem != RT_NULL)
+        rt_sem_release(s_eth_sem);
 }
 
 void wlh_eth_get_stats(wlh_eth_stats_t *stats) {

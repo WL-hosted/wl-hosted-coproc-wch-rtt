@@ -37,7 +37,7 @@
 #define WLH_USB_EP_MPS 512u
 #define WLH_USB_BUS_ID 0u
 
-/* A 4096-byte wire frame fits two full-size Ethernet raw records.  Bounded
+/* A 4096-byte wire frame fits two full-size Ethernet raw records. Bounded
  * two-record aggregation amortizes USB transfer completion and thread wakeup
  * cost in both directions while remaining within WLH_COPROC_MAX_FRAME_SIZE. */
 #define WLH_WIRE_MAX_FRAME_SIZE 4096u
@@ -47,14 +47,16 @@
  * with NAK backpressure on the OUT endpoint its size only affects burst
  * absorption, never correctness. */
 #define WLH_USB_RX_RING_SIZE 8192u
-#define WLH_USB_CONTROL_TX_QUEUE_DEPTH 4u
+/* Credit updates share USB IN with Ethernet data. Keep enough bounded control
+ * slots to absorb completions generated while one full data frame is active. */
+#define WLH_USB_CONTROL_TX_QUEUE_DEPTH 16u
 #define WLH_USB_DATA_TX_QUEUE_DEPTH 8u
 #define WLH_USB_TX_TIMEOUT_MS 2000u
 
-/* Core sizing. initial_credit is the host->device in-flight window per data
- * channel. It must not exceed WLH_ETH_TX_DESC_NUM: a burst larger than the
- * EMAC TX ring is REJECTED at the backend, which drops the frame (only the
- * credit is returned) — invisible to UDP but fatal to TCP burst recovery. */
+/* Core sizing. initial_credit is the in-flight window per data channel. The
+ * EMAC TX ring must be at least this deep for Host->wire traffic; wire->Host
+ * traffic retains an RX descriptor and applies backpressure when the peer
+ * credit window closes. */
 #define WLH_CORE_QUEUE_DEPTH 16u
 #define WLH_INITIAL_CREDIT 6u
 #define WLH_ETHERNET_TX_DEPTH WLH_USB_DATA_TX_QUEUE_DEPTH
@@ -79,11 +81,13 @@
 /* Wired Ethernet backend. Both targets use SMI address 0x01: CH32V307 uses
  * its internal 10BASE-T PHY, while CH32V317W uses the integrated 10/100M PHY
  * through its documented RMII pin configuration. Descriptor rings are
- * static and bounded: 3 RX + 6 TX buffers of ETH_MAX_PACKET_SIZE (1536) ~=
- * 13.8 KiB. WLH_INITIAL_CREDIT must stay <= the TX depth. */
+ * static and bounded: 6 RX + 6 TX buffers of ETH_MAX_PACKET_SIZE (1536) ~=
+ * 18.4 KiB. The RX ring absorbs a full credit window while a PAUSE frame
+ * reaches the link partner; WLH_INITIAL_CREDIT must stay <= both depths. */
 #define WLH_ETH_PHY_ADDR 0x01u
-#define WLH_ETH_RX_DESC_NUM 3u
+#define WLH_ETH_RX_DESC_NUM 6u
 #define WLH_ETH_TX_DESC_NUM 6u
+#define WLH_ETH_PAUSE_QUANTA 0x00f0u
 #define WLH_ETH_RX_TASK_STACK 2048u
 #define WLH_ETH_RX_TASK_PRIORITY 9u
 #define WLH_ETH_LINK_TASK_STACK 1536u

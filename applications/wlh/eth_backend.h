@@ -13,17 +13,23 @@
 #include "wlh/coproc.h"
 
 typedef struct wlh_eth_stats {
-    uint32_t rx_frames;   /* wire -> host, accepted by the core */
-    uint32_t rx_dropped;  /* valid frame but core queue full / no credit */
-    uint32_t rx_errors;   /* DMA descriptor error status */
-    uint32_t tx_frames;   /* host -> wire, transmitted */
-    uint32_t tx_errors;   /* DMA reported transmit error */
-    uint32_t tx_rejected; /* no free slot / bad size / link down */
-    uint32_t link_ups;    /* link down->up transitions */
-    uint32_t isr_rx;      /* R interrupts seen in the ETH ISR */
-    uint32_t isr_tx;      /* T interrupts seen in the ETH ISR */
-    uint32_t worker_wakes;      /* ETH worker loop iterations */
-    uint32_t worker_empty_rx;   /* wakes that drained no RX frame */
+    uint32_t rx_frames;  /* wire -> host, accepted by the core */
+    uint32_t rx_dropped; /* invalid/no-session frame intentionally discarded */
+    uint32_t rx_errors;  /* DMA descriptor error status */
+    uint32_t rx_backpressure;  /* NO_CREDIT transitions retaining descriptor */
+    uint32_t rx_retries;       /* retained descriptor retry attempts */
+    uint32_t pause_frames;     /* nonzero-quanta 802.3x PAUSE requests */
+    uint32_t resume_frames;    /* zero-quanta PAUSE requests */
+    uint32_t tx_frames;        /* host -> wire, transmitted */
+    uint32_t tx_errors;        /* DMA reported transmit error */
+    uint32_t tx_rejected;      /* no free slot / bad size / link down */
+    uint32_t link_ups;         /* link down->up transitions */
+    uint32_t isr_rx;           /* R interrupts seen in the ETH ISR */
+    uint32_t isr_tx;           /* T interrupts seen in the ETH ISR */
+    uint32_t isr_rbu;          /* RX-buffer-unavailable interrupts */
+    uint32_t core_ready_wakes; /* Coproc Core credit-ready notifications */
+    uint32_t worker_wakes;     /* ETH worker loop iterations */
+    uint32_t worker_empty_rx;  /* wakes that drained no RX frame */
     uint8_t link_up;
     uint8_t duplex_full;
 } wlh_eth_stats_t;
@@ -49,6 +55,10 @@ wlh_coproc_ethernet_rx_result_t wlh_eth_rx_from_core(
     const uint8_t *frame,
     size_t size
 );
+
+/* Coproc Core wire->Host credit-ready callback. Runs on the Core task and
+ * only wakes the ETH worker; the retained RX descriptor is retried there. */
+void wlh_eth_tx_ready(void *context, uint8_t channel);
 
 void wlh_eth_get_stats(wlh_eth_stats_t *stats);
 

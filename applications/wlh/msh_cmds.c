@@ -44,6 +44,12 @@ static void cmd_wlh_status(int argc, char **argv) {
                (unsigned long)diag.rpc_requests,
                (unsigned long)diag.ethernet_rx_rejected,
                (unsigned long)diag.ethernet_rx_failed);
+    rt_kprintf("eth_tx_no_credit=%lu queue_full=%lu late_failures=%lu "
+               "ready=%lu\n",
+               (unsigned long)diag.ethernet_tx_no_credit,
+               (unsigned long)diag.ethernet_tx_queue_full,
+               (unsigned long)diag.ethernet_tx_late_failures,
+               (unsigned long)diag.ethernet_tx_ready);
     rt_memory_info(&total, &used, &max_used);
     rt_kprintf("heap: total=%lu used=%lu max=%lu\n",
                (unsigned long)total,
@@ -93,13 +99,21 @@ static void cmd_eth_stats(int argc, char **argv) {
                (unsigned long)stats.rx_frames,
                (unsigned long)stats.rx_dropped,
                (unsigned long)stats.rx_errors);
+    rt_kprintf("backpressure=%lu retries=%lu pause=%lu resume=%lu\n",
+               (unsigned long)stats.rx_backpressure,
+               (unsigned long)stats.rx_retries,
+               (unsigned long)stats.pause_frames,
+               (unsigned long)stats.resume_frames);
     rt_kprintf("tx_frames=%lu tx_errors=%lu tx_rejected=%lu\n",
                (unsigned long)stats.tx_frames,
                (unsigned long)stats.tx_errors,
                (unsigned long)stats.tx_rejected);
-    rt_kprintf("isr_rx=%lu isr_tx=%lu wakes=%lu empty_rx=%lu\n",
+    rt_kprintf("isr_rx=%lu isr_tx=%lu isr_rbu=%lu ready_wakes=%lu\n",
                (unsigned long)stats.isr_rx,
                (unsigned long)stats.isr_tx,
+               (unsigned long)stats.isr_rbu,
+               (unsigned long)stats.core_ready_wakes);
+    rt_kprintf("wakes=%lu empty_rx=%lu\n",
                (unsigned long)stats.worker_wakes,
                (unsigned long)stats.worker_empty_rx);
 }
