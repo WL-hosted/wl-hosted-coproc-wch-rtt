@@ -297,8 +297,6 @@ void USBD_IRQHandler(uint8_t busid)
         ep_idx = (USBHS_DEVICE->INT_ST) & MASK_UIS_ENDP;
         token = (((USBHS_DEVICE->INT_ST) & MASK_UIS_TOKEN) >> 4) & 0x03;
 
-        USBHS_DEVICE->INT_FG = USBHS_TRANSFER_FLAG;
-
         if (token == PID_IN) {
             USB_SET_TX_CTRL(ep_idx, (USB_GET_TX_CTRL(ep_idx) & ~(USBHS_EP_T_RES_MASK | USBHS_EP_T_TOG_MASK)) | USBHS_EP_T_RES_NAK | USBHS_EP_T_TOG_0);
             if (ep_idx == 0x00) {
@@ -411,6 +409,15 @@ void USBD_IRQHandler(uint8_t busid)
                 }
             }
         }
+
+        /* RX_LEN and INT_ST describe the transfer whose flag is pending.
+         * Clear the flag only after consuming both values and updating the
+         * endpoint response.  Clearing it before NAKing/reading RX_LEN opens
+         * a window where a following high-speed OUT packet can overwrite the
+         * registers and DMA buffer, which presents short wire frames as 512
+         * bytes followed by stale zero data.  This ordering matches WCH's
+         * CH32V307EVT USBHS device examples. */
+        USBHS_DEVICE->INT_FG = USBHS_TRANSFER_FLAG;
     }
 
     if (intflag & USBHS_SETUP_FLAG) {

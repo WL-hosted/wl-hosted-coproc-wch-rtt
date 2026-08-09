@@ -192,8 +192,8 @@
 /* Utilities */
 
 #define RT_USING_ULOG
-#define ULOG_OUTPUT_LVL_D
-#define ULOG_OUTPUT_LVL 7
+#define ULOG_OUTPUT_LVL_W
+#define ULOG_OUTPUT_LVL 4
 #define ULOG_USING_ISR_LOG
 #define ULOG_ASSERT_ENABLE
 #define ULOG_LINE_BUF_SIZE 128

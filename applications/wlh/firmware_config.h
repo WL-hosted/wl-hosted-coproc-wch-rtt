@@ -37,10 +37,10 @@
 #define WLH_USB_EP_MPS 512u
 #define WLH_USB_BUS_ID 0u
 
-/* A 2048-byte wire frame still fits a full 1518-byte L2 frame plus
- * raw-record and wire headers; the host clamps its TX to the negotiated
- * minimum, so nothing larger ever arrives. */
-#define WLH_WIRE_MAX_FRAME_SIZE 2048u
+/* A 4096-byte wire frame fits two full-size Ethernet raw records.  Bounded
+ * two-record aggregation amortizes USB transfer completion and thread wakeup
+ * cost in both directions while remaining within WLH_COPROC_MAX_FRAME_SIZE. */
+#define WLH_WIRE_MAX_FRAME_SIZE 4096u
 
 /* USB transport queueing (all bounded, all static). The RX ring absorbs one
  * full credit window (6 x 1546-byte wire frames ~= 9.1 KiB would be tight);
@@ -58,7 +58,7 @@
 #define WLH_CORE_QUEUE_DEPTH 16u
 #define WLH_INITIAL_CREDIT 6u
 #define WLH_ETHERNET_TX_DEPTH WLH_USB_DATA_TX_QUEUE_DEPTH
-#define WLH_ETHERNET_TX_AGGREGATION_LIMIT 1u
+#define WLH_ETHERNET_TX_AGGREGATION_LIMIT 2u
 #define WLH_HEARTBEAT_INTERVAL_MS 1000u
 #define WLH_STOP_TIMEOUT_MS 3000u
 
