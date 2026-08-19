@@ -3,16 +3,24 @@
 set(WLH_TARGET "ch32v307" CACHE STRING "WL-hosted WCH target")
 set_property(CACHE WLH_TARGET PROPERTY STRINGS ch32v307 ch32v317)
 
+# Former single 'wlh' SCons group is now split by layer under applications/
+# (app / backends / transports/usb); the header-only transports layer maps to
+# an INTERFACE library and needs no compile settings.
+set(_WLH_LAYER_TARGETS rtt_wlh_app rtt_wlh_backends rtt_wlh_transport_usb)
+
 if(WLH_TARGET STREQUAL "ch32v307")
-    target_compile_definitions(rtt_wlh PRIVATE WLH_TARGET_CH32V307=1)
+    set(_WLH_TARGET_DEFINE WLH_TARGET_CH32V307=1)
 elseif(WLH_TARGET STREQUAL "ch32v317")
-    target_compile_definitions(rtt_wlh PRIVATE WLH_TARGET_CH32V317=1)
+    set(_WLH_TARGET_DEFINE WLH_TARGET_CH32V317=1)
 else()
     message(FATAL_ERROR
         "Unsupported WLH_TARGET='${WLH_TARGET}'; expected ch32v307 or ch32v317"
     )
 endif()
-target_compile_options(rtt_wlh PRIVATE -Wall -Werror)
+foreach(_wlh_target IN LISTS _WLH_LAYER_TARGETS)
+    target_compile_definitions(${_wlh_target} PRIVATE ${_WLH_TARGET_DEFINE})
+    target_compile_options(${_wlh_target} PRIVATE -Wall -Werror)
+endforeach()
 
 set(_WLHOSTED_ARTIFACT_STEM "wlhosted-${WLH_TARGET}")
 add_custom_command(TARGET ${CMAKE_PROJECT_NAME}.elf POST_BUILD

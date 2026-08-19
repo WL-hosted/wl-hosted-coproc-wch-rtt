@@ -8,6 +8,6 @@ src = Glob('*.c')
 # Same log backend selection as wl-hosted-core's SConscript (RTT ulog).
 CPPDEFINES = ['WLH_LOG_BACKEND_RTT_ULOG']
 
-group = DefineGroup('wlh', src, depend=[''], CPPPATH=CPPPATH, CPPDEFINES=CPPDEFINES)
+group = DefineGroup('wlh_transport_usb', src, depend=[''], CPPPATH=CPPPATH, CPPDEFINES=CPPDEFINES)
 
 Return('group')

@@ -17,7 +17,7 @@ scons --pyconfig-silent
 ## 构建与下载
 
 - 根 `CMakeLists.txt` 由 `scons --target=cmake` 生成，**gitignored，不手改**；tracked 的 `custom.cmake` 被其自动 include（flash targets、bl_s1/bl_s2 在这里；**wl-hosted-core 不在这里接入**——core 仓库根部的 `SConscript` 由 scons 的源码 walk 自动收集为 `wlh_core` group，无需 custom.cmake 接线）。
-- 新增源码：放进带子目录 SConscript 的目录（如 `applications/wlh/`），改动 SConscript 后重新 `scons --target=cmake` 再配置 CMake。
+- 新增源码：放进 `applications/` 下对应分层目录（`app/`、`backends/`、`transports/<link>/`，均带 SConscript），改动 SConscript 后重新 `scons --target=cmake` 再配置 CMake。
 - 构建目标由 `-DWLH_TARGET=ch32v307|ch32v317` 选择，未指定时默认 `ch32v307`；两目标必须使用独立 build 目录。
 - 构建：`cmake -S . -B build-v307 -DCMAKE_BUILD_TYPE=Debug -DWLH_TARGET=ch32v307 && cmake --build build-v307 --parallel`。
 - 下载：`cmake --build build-v307 --target flash`（app 经 wlink）；`flash_all`（合并 bl_s1+app+bl_s2，需要 mergehex-rs）。

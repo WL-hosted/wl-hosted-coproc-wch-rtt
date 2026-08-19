@@ -1,11 +1,9 @@
 from building import *
 import os
 
-cwd     = GetCurrentDir()
-CPPPATH = [cwd]
-src = ['main.c']
+cwd = GetCurrentDir()
 
-group = DefineGroup('Applications', src, depend = [''], CPPPATH = CPPPATH)
+group = DefineGroup('Applications', [], depend=[''], CPPPATH=[cwd])
 
 list = os.listdir(cwd)
 for item in list:

@@ -50,8 +50,10 @@ SDK、USBHS、启动文件、分区和 bootloader。
 
 ## 布局
 
-- `applications/` — RT-Thread 应用入口（FinSH 控制台在 USART1 PA9/PA10 @115200）。
-- `applications/wlh/` — WL-hosted 适配层：USB bulk 传输、coproc-core 装配、ETH 后端、msh 诊断命令、CherryUSB `usb_config.h`。
+- `applications/` — RT-Thread 应用目录（main/ 等价物，FinSH 控制台在 USART1 PA9/PA10 @115200），内部分层：
+  - `app/` — 入口 `main.c`、coproc-core 装配（`wlh_app`）、`firmware_config.h`、msh 诊断命令；
+  - `backends/` — ETH 后端与 PHY 初始化；
+  - `transports/` — 链路公共头 `transport.h`；`usb/` 为 USB bulk 传输与 CherryUSB `usb_config.h`。
 - `bl_s1/`、`bl_s2/` — 两级 bootloader；分区见 `part_table.md`。
 - `core/` — wl-hosted-core submodule，不要在此目录内改代码。
 - 更多约定见 `AGENTS.md`。
